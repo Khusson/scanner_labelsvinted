@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ZXing Barcode → CSV Lookup (DataMatrix ready)</title>
-  <meta name="description" content="Scan DataMatrix/QR/EAN/Code128 in de browser en zoek gegevens op in een geüploade CSV (Point code → Route/Sequence/naam/adres/drop/pick/uren)." />
+  <title>ZXing Barcode → CSV Lookup (DataMatrix) – Achtercamera Fix</title>
+  <meta name="description" content="Scan DataMatrix/QR/EAN/Code128 in de browser en zoek gegevens op in een geüploade CSV. Default achtercamera + fallback." />
   <style>
     :root { --bg:#0b1220; --fg:#e9f0ff; --muted:#9fb3d1; --card:#0f172a; --border:#1e293b; --ok:#67ff86; --err:#ff7a7a; }
     *{box-sizing:border-box}
@@ -19,31 +19,26 @@
     input[type=file], select, button{width:100%;margin-top:6px;margin-bottom:12px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0b1220;color:var(--fg)}
     button.primary{background:#1d4ed8;border-color:#1e40af}
     video{width:100%;max-width:520px;border-radius:12px;border:2px solid var(--border);background:#000}
-    canvas{display:none}
     #result{white-space:pre-line;background:#07101f;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px;min-height:64px;font-size:22px;line-height:1.35}
     .hint{color:var(--muted);font-size:13px;line-height:1.4}
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .row > * {flex:1 1 220px}
     .pill{display:inline-flex;gap:8px;align-items:center;background:#0a162c;border:1px solid var(--border);border-radius:999px;padding:8px 12px;font-size:13px}
     .ok{color:var(--ok)} .err{color:var(--err)}
-    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;background:#0a162c;border:1px solid var(--border);padding:2px 6px;border-radius:6px}
   </style>
 </head>
 <body>
   <header>
     <h1>ZXing Barcode → CSV Lookup</h1>
-    <div class="pill">Ondersteunt DataMatrix • QR • EAN • Code128 • meer</div>
+    <div class="pill">DataMatrix/QR/EAN/Code128 • Default achtercamera</div>
   </header>
 
   <main>
     <section class="card">
       <h2>CSV laden</h2>
       <div class="content">
-        <p class="hint">Upload je routes-CSV met kolommen: <code>Point code</code>, <code>Route ID</code>, <code>Route sequence</code>, <code>Point name</code>, <code>Address</code>, <code>Number of bags to drop-off</code>, <code>Number of bags to pick-up</code>, <code>Delivery hours</code>.</p>
-        <div class="row">
-          <input type="file" id="csvfile" accept=".csv" />
-          <button id="clearBtn">CSV leegmaken</button>
-        </div>
+        <input type="file" id="csvfile" accept="*/*" />
+        <button id="clearBtn">CSV leegmaken</button>
         <div id="csvStatus" class="hint"></div>
       </div>
     </section>
@@ -55,32 +50,10 @@
           <select id="cameraSelect"></select>
           <button id="startBtn" class="primary">Camera starten</button>
           <button id="stopBtn">Stoppen</button>
-          <button id="beepBtn">Test beep</button>
         </div>
         <video id="video" autoplay playsinline muted></video>
         <div id="camStatus" class="hint"></div>
         <div id="result">Geen scan</div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Fallback: scan een foto</h2>
-      <div class="content">
-        <p class="hint">Geen cameratoegang? Upload een foto/screenshot van een DataMatrix/QR/barcode.</p>
-        <input type="file" id="imgfile" accept="image/*" />
-        <div id="imgStatus" class="hint"></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Tips</h2>
-      <div class="content hint">
-        <ul>
-          <li>Deze pagina werkt op GitHub Pages (HTTPS) → camera werkt in Chrome (Android & desktop).</li>
-          <li>Geef toestemming bij het slot-icoon in de adresbalk.</li>
-          <li>Gebruik de keuzelijst om naar de <b>achtercamera</b> te wisselen op mobiel.</li>
-        </ul>
-        <p>Debounce: dezelfde code wordt max. 1×/2s gemeld.</p>
       </div>
     </section>
   </main>
@@ -89,18 +62,14 @@
   <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAaWQAAABkYXRhAAAAAA==" type="audio/wav">
 </audio>
 
-<!-- CSV parser -->
 <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
-<!-- ZXing -->
 <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
 <script src="https://unpkg.com/@zxing/browser@0.1.3"></script>
 <script>
 const { BrowserMultiFormatReader } = ZXingBrowser;
-
 let db = [];
 let lastCode = null;
 let debounceAt = 0;
-let selectedDeviceId = undefined;
 let reader = null;
 let controls = null;
 
@@ -110,37 +79,26 @@ const camStatus = document.getElementById('camStatus');
 const resultEl = document.getElementById('result');
 const beepAudio = document.getElementById('beepAudio');
 
-// --- CSV ---
+// ---- CSV ----
 document.getElementById('csvfile').addEventListener('change', (ev)=>{
   const f = ev.target.files[0];
-  if(!f) return;
-  Papa.parse(f, {header:true, skipEmptyLines:true, complete:function(results){
-    db = results.data;
-    localStorage.setItem('db_cache', JSON.stringify(db.slice(0, 20000))); // cache eerste 20k rijen
-    document.getElementById('csvStatus').innerHTML = '<span class="ok">CSV geladen:</span> ' + db.length + ' rijen';
-  }, error:function(err){
-    document.getElementById('csvStatus').innerHTML = '<span class="err">CSV fout:</span> ' + err;
-  }});
-});
-
-document.getElementById('clearBtn').addEventListener('click', ()=>{
-  db = [];
-  localStorage.removeItem('db_cache');
-  document.getElementById('csvfile').value = '';
-  document.getElementById('csvStatus').textContent = 'Leeg.';
-});
-
-(function restoreCache(){
-  try {
-    const cached = localStorage.getItem('db_cache');
-    if (cached) {
-      db = JSON.parse(cached);
-      document.getElementById('csvStatus').textContent = 'CSV uit cache geladen: ' + db.length + ' rijen';
+  if (!f) return;
+  Papa.parse(f, {
+    header:true, skipEmptyLines:true,
+    complete:(results)=>{
+      db = results.data;
+      document.getElementById('csvStatus').innerHTML = '<span class="ok">CSV geladen:</span> ' + db.length + ' rijen';
+    },
+    error:(err)=>{
+      document.getElementById('csvStatus').innerHTML = '<span class="err">CSV fout:</span> ' + err;
     }
-  } catch(_){}
-})();
+  });
+});
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  db = []; document.getElementById('csvStatus').textContent = 'Leeg.';
+});
 
-// --- Camera lijst ---
+// ---- Camera lijst ----
 async function listCameras() {
   cameraSelect.innerHTML = '';
   try {
@@ -152,42 +110,42 @@ async function listCameras() {
       opt.textContent = c.label || ('Camera ' + (i+1));
       cameraSelect.appendChild(opt);
     });
-    if (!cams.length) {
-      camStatus.innerHTML = '<span class="err">Geen camera’s gevonden</span>';
-    }
   } catch (e) {
     camStatus.innerHTML = '<span class="err">Kan camera’s niet ophalen:</span> ' + e;
   }
 }
 
-// --- Scanner starten/stoppen ---
+// ---- Scanner ----
 async function startScanner() {
   stopScanner();
   try {
     reader = new BrowserMultiFormatReader();
-    selectedDeviceId = cameraSelect.value || undefined;
-    camStatus.textContent = 'Scanner initialiseren…';
+    let deviceId = cameraSelect.value || undefined;
 
-    controls = await reader.decodeFromVideoDevice(selectedDeviceId, videoEl, (result, err, controls) => {
-      if (result) onDetected(result.getText());
-      if (err && !(err instanceof ZXing.NotFoundException)) {
-        console.warn(err);
+    // Als niets gekozen → probeer expliciet achtercamera
+    if (!deviceId) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } } });
+        stream.getTracks().forEach(t=>t.stop()); // direct weer stoppen
+        camStatus.textContent = "Achtercamera gevonden (default)";
+      } catch (e) {
+        camStatus.textContent = "Geen expliciete achtercamera, fallback naar standaard";
       }
+    }
+
+    controls = await reader.decodeFromVideoDevice(deviceId || null, videoEl, (result, err) => {
+      if (result) onDetected(result.getText());
+      if (err && !(err instanceof ZXing.NotFoundException)) console.warn(err);
     });
     camStatus.innerHTML = '<span class="ok">Scanner actief</span>';
   } catch (e) {
     camStatus.innerHTML = '<span class="err">Startfout:</span> ' + e;
   }
 }
-
 function stopScanner() {
-  try {
-    if (controls) { controls.stop(); controls = null; }
-    if (reader) { reader.reset(); reader = null; }
-  } catch(_){}
+  try { if (controls) { controls.stop(); controls = null; } if (reader) { reader.reset(); reader = null; } } catch(_){}
   camStatus.textContent = 'Gestopt';
 }
-
 function onDetected(codeText){
   const now = Date.now();
   if (codeText === lastCode && (now - debounceAt) < 2000) return;
@@ -195,13 +153,12 @@ function onDetected(codeText){
 
   const match = db.find(r => (r['Point code']||'').trim() === codeText.trim());
   if(match){
-    const text =
-      `Route: ${match['Route ID']} (seq ${match['Route sequence']})\n` +
-      `Naam: ${match['Point name']}\n` +
-      `Adres: ${match['Address']}\n` +
-      `Drop: ${match['Number of bags to drop-off']}   Pick: ${match['Number of bags to pick-up']}\n` +
-      `Uren: ${match['Delivery hours']}\n` +
-      `Code: ${codeText}`;
+    const text = `Route: ${match['Route ID']} (seq ${match['Route sequence']})\n` +
+                 `Naam: ${match['Point name']}\n` +
+                 `Adres: ${match['Address']}\n` +
+                 `Drop: ${match['Number of bags to drop-off']}   Pick: ${match['Number of bags to pick-up']}\n` +
+                 `Uren: ${match['Delivery hours']}\n` +
+                 `Code: ${codeText}`;
     resultEl.textContent = text;
     try { beepAudio.play().catch(()=>{}); } catch(_){}
   } else {
@@ -209,51 +166,12 @@ function onDetected(codeText){
   }
 }
 
-// --- Fallback: afbeelding ---
-document.getElementById('imgfile').addEventListener('change', async (e)=>{
-  const f = e.target.files[0];
-  if (!f) return;
-  try {
-    const url = URL.createObjectURL(f);
-    const img = new Image();
-    img.onload = async () => {
-      try {
-        const tmpReader = new BrowserMultiFormatReader();
-        const result = await tmpReader.decodeFromImage(img);
-        onDetected(result.getText());
-        document.getElementById('imgStatus').innerHTML = '<span class="ok">Barcode uit afbeelding:</span> ' + result.getText();
-      } catch (err) {
-        document.getElementById('imgStatus').innerHTML = '<span class="err">Geen barcode gevonden in afbeelding</span>';
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    };
-    img.src = url;
-  } catch (e2) {
-    document.getElementById('imgStatus').innerHTML = '<span class="err">Fout bij lezen afbeelding:</span> ' + e2;
-  }
-});
-
-// UI
 document.getElementById('startBtn').addEventListener('click', async ()=>{
   try { await navigator.mediaDevices.getUserMedia({video:true}); } catch(_){}
   await listCameras();
   startScanner();
 });
-
-document.getElementById('stopBtn').addEventListener('click', ()=>{
-  stopScanner();
-});
-
-document.getElementById('beepBtn').addEventListener('click', ()=>{
-  try { beepAudio.play().catch(()=>{}); } catch(_){}
-});
-
-// Init
-(async ()=>{
-  try { await navigator.mediaDevices.getUserMedia({video:true}); } catch(_){}
-  await listCameras();
-})();
+document.getElementById('stopBtn').addEventListener('click', ()=> stopScanner());
 </script>
 </body>
 </html>
