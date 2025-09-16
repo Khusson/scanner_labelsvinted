@@ -1,5 +1,3 @@
-# scanner_labelsvinted
-scant labels en geeft route
 # ZXing Barcode → CSV Lookup (DataMatrix ready)
 
 Een 1-bestand webapp die **DataMatrix, QR, EAN, Code128, Code39, ITF, UPC** enz. kan scannen in de browser en
